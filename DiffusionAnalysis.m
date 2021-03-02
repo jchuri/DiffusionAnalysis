@@ -1,8 +1,4 @@
-function DiffAnal = DiffAnal()
-
 %% Intro and news
-% A mature naming scheme for mature people
-
 % This is the 2019 iteration of the old code "FWHMMulAdv.m"
 % That code was started by Ethan and put together by Anthony
 % Neither of which knew what they were doing
@@ -45,7 +41,7 @@ cd(startdir);
 %     load('Background/AverageBackground.mat')
 % end
 
-folderlist = dir('*ms');
+folderList = dir('*ms');
 % backgroundlist = dir('*bg');
 %%
 
@@ -80,54 +76,51 @@ thresholdone = 2500;
 figure;
 % Now we're going to go through the folders found in the directory
 % Start at 3 because the first two are '.' and '..'
-for i = 1:length(folderlist);  
+for i = 1:length(folderList);  
     % Take the name of the folder, look at it and pull out a number
     % That should be the timing in ms, and it'll save to temp as a string
     % inside of a cell
-    temp = regexp(folderlist(i).name,'\d+\.?\d*|-\d+\.?\d*|\.?\d+|-\.?\d+','match');
+    temp = regexp(folderList(i).name,'\d+\.?\d*|-\d+\.?\d*|\.?\d+|-\.?\d+','match');
     % Call that cell, convert the string inside to a number so we can plot
     % it later
     times(i) = str2num(temp{1}) * 0.001;
     timesMS(i) = str2num(temp{1});
    
     % Now we're actually going to go into the folder...
-    cd(folderlist(i).name);
+    cd(folderList(i).name);
     % ...And look at all the filse inside
-    Filelist = dir('*.txt');
+    fileList = dir('*.txt');
     % One by one, load them all into a cell
     j2 = 1;
-    for j = 1:length(Filelist)
-        % We're going to check how much light each imaged actually picked
-        % up
+    for j = 1:length(fileList)
+        % We're going to check how much light each image actually picked up
         % If it's below the threshold, the image is just going to be
         % removed
-        tempcell{j2} = load(Filelist(j).name);
+        tempcell{j2} = load(fileList(j).name);
         % This sums up every single pixel intensity to one value
-        intensitysum = sum(sum(tempcell{j2}));
+        intensitySum = sum(sum(tempcell{j2}));
         % And then this will find the maximum intensity of any one bin AND
         % it's index
-        [intensitymax,index] = max(tempcell{j2}(:));
-        [intensitymin,index] = min(tempcell{j2}(:));
+        [intensityMax,index] = max(tempcell{j2}(:));
+        [intensityMin,index] = min(tempcell{j2}(:));
         % It turns out that index is worthless on its own for a 2D list
         % Instead, convert it to an x and a y coordinate
-        [xguess,yguess] = ind2sub(size(tempcell{j2}),index);     
-        
-        % Are we above threshold? 
+        [xguess,yguess] = ind2sub(size(tempcell{j2}),index);
+        % Are we above threshold?
         %if intensitysum < thresholdall
-        if intensitymax < thresholdone
+        if intensityMax < thresholdone
             % If not, toss it
             tempcell{j2} = [];
-            disp(['Tossed file number ',num2str(j),' from folder ',folderlist(i).name]);
+            disp(['Tossed file number ',num2str(j),' from folder ',folderList(i).name]);
         else
             % If yes, keep it, update j2
             j2 = j2 + 1;
         end
-        
         % Are there negative numbers?
-        if intensitymin < 0
+        if intensityMin < 0
             % If so, toss it
             tempcell{j2} = [];
-            disp(['Just tossed file number ',num2str(j),' from folder ',folderlist(i).name]);
+            disp(['Just tossed file number ',num2str(j),' from folder ',folderList(i).name]);
         else
             % If not, keep it, update j2
             j2 = j2 + 1;
@@ -234,7 +227,7 @@ end
 % hold on
 % plot(Xmat,Bottommat)
 
-PXtoCM = 2.85e-3;%3.6e-3%5.2e-3;%2.85e-3;%4e-3 gives X diffusion to match Schiavoni. Ethan's value is 5.2e-3.
+PXtoCM = 2.85e-3;%3.6e-3%5.2e-3;%4e-3 gives X diffusion to match Schiavoni. Ethan's value is 5.2e-3.
 ConversionFactor = PXtoCM*PXtoCM;
 
 % Now we want to figure out that diffusion constant
@@ -259,7 +252,7 @@ Gz = 2*pi*RbMass*(diffx/10000)/h;
 disp(['Gx = ',num2str(Gx)]);
 disp(['Gz = ',num2str(Gz)]);
 
-% Once you have those variables for your line plug them into a function to
+% Once you have those variables for your line, plug them into a function to
 % get out a set of actualy fitted lines
 vxfit = polyval(linfitcoeffx,times);
 vyfit = polyval(linfitcoeffy,times);
@@ -285,6 +278,4 @@ plot(timesMS,vxfit.*ConversionFactor,timesMS,vyfit.*ConversionFactor);
 
 % The second is a list of the arrays if you wanted to look at the 3D plots
 % of each timing separately
-
 save('Plots.mat','PrettyPic');
-
