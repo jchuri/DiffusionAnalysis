@@ -1,34 +1,48 @@
-%% Intro and news
-% This is the 2019 iteration of the old code "FWHMMulAdv.m"
-% That code was started by Ethan and put together by Anthony
-% Neither of which knew what they were doing
+%% Intro and Change Log
+% This is the 2021 version of "DiffAnalNoBack120619.m". The people who named
+% it were obviously very mature.
+% Originally written by Ethan Clements and Anthony Rapp, slightly refined by
+% Alex Staron, and most recently overhauled by Ian Dilayrd and Jordan Churi.
 
-% New code is meant to be as comprehensive as possible, provide easy
-% analysis
+% While the original code worked just fine, there was definitely room for
+% improvement and cleaning-up. This version is meant to do just that while
+% maintaining readability and making maintainence easier in the future.
+
+% This script takes a full set of diffusion data and produces average images
+% of the MOT at each stage of expansion, as well as a graph of the variance
+% along x and z with respect to expansion time. It also calculates the
+% diffusion constants along those directions and converts them into
+% "G-factors" that Grynberg sometimes reported in his papers on diffusion.
+
+% Change log (as of March 3, 2021):
+    % Revised some variable names and changed some spacings
+    % Preallocated some arrays that hold important data (times, variance_x/y, etc.)
+    % Broke apart the operations within the big FOR loop over each timing folder
+        % -"parseTXTFile.m" checks to see if each .txt file is acceptable to use
+        % -"TwoDGaussianFitting.m" compiles the results of "parseTXTFile.m",
+        % creates the averaged and corrected image, fits it with a 2D
+        % Gaussian, then extracts the variance along x and y and the
+        % coordinates of the cloud's center of mass
+
+%% DATA REQUIREMENTS
+% All data folders should be named in the scheme '**ms' for data and '**bg'
+% for backgrounds. These folders go into a folder whose name is the date
+% that the measurements were taken. (Previous format was MonthDayYear
+% (example: 073020), but any format should be OK)
 
 % Assuming that only occasionally you have bad data, it should get averaged
 % out by the other 'good' data sets. In a best case scenario, you totally
 % missed the cloud and just got the background, in which case it doesn't do
-% anything bad at all, since all of these values will get scaled anyways
-
-% Another big improvement is that the cloud doesn't have to be centered
-% anymore! This used to be a VERY big issue. Since it works by fitting now,
-% you can have off-center or even partially off-screen clouds and it should
-% still fit pretty well
-
-%% DATA REQUIREMENTS
-% All data folders should be named in the scheme '**ms' for data and '**bg'
-% for backgrounds.
-% This program will find all folders with that name and pull them to use in
-% data. Other things are allowed to be in the folder now
-
+% anything bad at all, since all of these values will get scaled anyways.
+% The cloud itself doesn't need to be centered (in fact, it can be
+% partially off-screen) since the script fits everything.
 %% GUI for finding the right folder
 % Start by figuring out where all of our folders are 
-
-startdir = uigetdir('Where are all the data folders?');
-cd(startdir);
-
-%% Load in the background
+clear;
+initDir = 'C:\Users\staronal\Desktop\Raw Data\Diffusion'; %IF YOU RUN THIS SCRIPT ON ANOTHER COMPUTER, CHANGE THIS PATH BEFOREHAND!
+dataDir = uigetdir('Where are all the data folders?');
+cd(dataDir);
+%% Load the Data and Background (if there is one)
 % Use this section of the code if dealing with one, constant background.
 % Looks for the folder named 'Background' and pulls the fitted file from
 % that
@@ -40,11 +54,8 @@ cd(startdir);
 % else
 %     load('Background/AverageBackground.mat')
 % end
-
 folderList = dir('*ms');
 % backgroundlist = dir('*bg');
-%%
-
 %% Load in Multiple Backgrounds
 % Use this section of the code if dealing with a changing background.
 % Looks for folders with 'bg' at the end of their name and builds
@@ -71,118 +82,66 @@ folderList = dir('*ms');
 % You can pick the 'all' option to sum over every pixel
 % The 'one' option just finds the brightest pixel and compares to that
 %thresholdall = 5e+7;
-thresholdone = 2500;
+thresholdOne = 2500;
+%Preallocate arrays to hold the timing and variance info, averaged
+%pictures, and centers of mass for each expansion time
+times = zeros(1, length(folderList));
+timesMS = zeros(1, length(folderList));
+x_var = zeros(1, length(folderList));
+y_var = zeros(1, length(folderList));
+PrettyPic = cell(1, length(folderList));
+x_cen = zeros(1, length(folderList));
+y_cen = zeros(1, length(folderList));
+% Add a path to the Diffusion folder, which was set as initDir.
+% This is necessary in order to properly call the custom functions used to
+% analyze the data (like parseTXTFile, etc.)
+% There's probably a better way to do this whole analysis that would avoid
+% this step...
+addpath(genpath(initDir));
 
-figure;
 % Now we're going to go through the folders found in the directory
-% Start at 3 because the first two are '.' and '..'
+figure;
 for i = 1:length(folderList);  
-    % Take the name of the folder, look at it and pull out a number
-    % That should be the timing in ms, and it'll save to temp as a string
-    % inside of a cell
-    temp = regexp(folderList(i).name,'\d+\.?\d*|-\d+\.?\d*|\.?\d+|-\.?\d+','match');
-    % Call that cell, convert the string inside to a number so we can plot
-    % it later
-    times(i) = str2num(temp{1}) * 0.001;
-    timesMS(i) = str2num(temp{1});
-   
-    % Now we're actually going to go into the folder...
+    % Extract the timing (in ms) from the folder name. It's saved in a cell.
+    timeFromFolderName = regexp(folderList(i).name,'\d+\.?\d*|-\d+\.?\d*|\.?\d+|-\.?\d+','match');
+    % Convert the string witin the cell into a number. This number will be
+    % used when plotting stuff later.
+    times(i) = str2num(timeFromFolderName{1}) * 0.001;
+    timesMS(i) = str2num(timeFromFolderName{1});
+    % Go into the timing folder and create a list of all the .txt files inside
     cd(folderList(i).name);
-    % ...And look at all the filse inside
     fileList = dir('*.txt');
-    % One by one, load them all into a cell
-    j2 = 1;
+    % Create a cell array to hold the good data cells and a counter to track how many there are
+    goodFiles = cell(1, length(fileList));
+    counter = 1;
+    % Go through the .txt files and check them for validity. The maximum
+    % intensity should be above thresholdOne and the minimum intensity
+    % should be positive or 0. See "parseTXTFile.m" for more details.
     for j = 1:length(fileList)
-        % We're going to check how much light each image actually picked up
-        % If it's below the threshold, the image is just going to be
-        % removed
-        tempcell{j2} = load(fileList(j).name);
-        % This sums up every single pixel intensity to one value
-        intensitySum = sum(sum(tempcell{j2}));
-        % And then this will find the maximum intensity of any one bin AND
-        % it's index
-        [intensityMax,index] = max(tempcell{j2}(:));
-        [intensityMin,index] = min(tempcell{j2}(:));
-        % It turns out that index is worthless on its own for a 2D list
-        % Instead, convert it to an x and a y coordinate
-        [xguess,yguess] = ind2sub(size(tempcell{j2}),index);
-        % Are we above threshold?
-        %if intensitysum < thresholdall
-        if intensityMax < thresholdone
-            % If not, toss it
-            tempcell{j2} = [];
-            disp(['Tossed file number ',num2str(j),' from folder ',folderList(i).name]);
-        else
-            % If yes, keep it, update j2
-            j2 = j2 + 1;
-        end
-        % Are there negative numbers?
-        if intensityMin < 0
-            % If so, toss it
-            tempcell{j2} = [];
-            disp(['Just tossed file number ',num2str(j),' from folder ',folderList(i).name]);
-        else
-            % If not, keep it, update j2
-            j2 = j2 + 1;
+        if parseTXTFile(fileList(j).name, thresholdOne, j, folderList(i).name) == true
+            goodFiles{counter} = load(fileList(j).name);
+            counter = counter + 1;
         end
     end
-    % Then take all of the cells and convert them into a big
-    % three-dimensional array
-    image = cat(3,tempcell{1:end});
-    % Now we have everything in one, smash it all down to an average
-    % picture
-    AvgPic = mean(image,3);
-    
-    % Then pull away whatever the background picks up
-    % Pull off the first column, it's just zeros
-    % This is the "corrected picture" of the averaged clouds, taking away
-    % whatever light we saw from the background
-    
-%     CorPic = AvgPic(2:end,1:end) - AvgBack{i}(2:end,1:end);
-    CorPic = AvgPic(2:end,1:end);
-    
-    % Then scale it so most intense point is 1
-    CorPic = CorPic./max(max((CorPic)));
-    % PrettyPic is just a cell of the scaled and cleaned up array. We won't
-    % plot it in this program because it would just be a lot of plots, but
-    % it's saved so you can look at them later
-    PrettyPic{i} = CorPic;
-    % Now we want to fit a two-dimensional Gaussian to this data
-    % This essentially turns xo, yo, and zo into these really big lists
-    % that the fitting program will pull from in the next step
-    [xo,yo,zo] = prepareSurfaceData(1:125,1:125,CorPic);
-    % Then we actually fit them to a basic two-dimensional Gaussian
-    % This is started with the assumption that the center of the cloud is
-    % probably right around the middle. The starting variance is just kind
-    % of a guess. If the fitting isn't working well, maybe try changing
-    % these.
-    % The other option for "Robust" is "LAR"
-    % As I understand, use LAR if you don't have many outliers in your
-    % data. Use Bisquare in case you might have some occasional "out there"
-    % values.
-    ft = fit([xo,yo],zo,'exp(-(((x-xcen)^2)/vx + ((y-ycen)^2)/vy))','StartPoint',[100,100,62,62],'Robust','Bisquare');
-    % Order currently vx,vy,xcen,ycen
-    % Ease of computation, both vx and vy are missing a 1/2 in the fitting
-    % Then vx and vy are lists of the variance in x and y
-    vx(i) = ft.vx./2;
-    vy(i) = ft.vy./2;
-    % While xcen and ycen are lists of the center of mass
-    xcen(i)=ft.xcen;
-    ycen(i)=ft.ycen;
-    % Move back up in directory so we can go into the next folder
-    cd('..')
-    
+    % Compile the data in the good .txt files to create an average and
+    % intensity-corrected image of the cloud. Fit that with a 2D Gaussian,
+    % then extract the variance along x and y and the coordinates of the
+    % cloud's center of mass from the fitting. See "TwoDGaussianFitting.m"
+    % for more details.
+    [PrettyPic{i}, x_var(i), y_var(i), x_cen(i), y_cen(i)] = TwoDGaussianFitting(goodFiles);
+    % Use the extracted variances to calculate the full-width half-max
+    % (FWHM) along x and y
     % Full-width half-max of a Gaussian is based on standard deviation
     % Specifically, about 2.355 standard deviations away
-    FWHMX = 2.355*sqrt(vx(i));
-    FWHMY = 2.355*sqrt(vy(i));
+    FWHM_X = 2.355*sqrt(x_var(i));
+    FWHM_Y = 2.355*sqrt(y_var(i));
     % This is an X generated for plotting out the different FWHM
-    X = linspace(-FWHMX+xcen(i),FWHMX+xcen(i),1000);
+    X = linspace(-FWHM_X + x_cen(i), FWHM_X + x_cen(i), 1000);
     % There's a better way to do this, but it creates the top and bottom
     % halves of the ellipse of the FWHM...
     for j = 1:length(X)
-        tophalf(j) = (FWHMY/FWHMX)*sqrt(FWHMX^2-(X(j)-xcen(i))^2) + ycen(i);
-        bothalf(j) =-(FWHMY/FWHMX)*sqrt(FWHMX^2-(X(j)-xcen(i))^2) + ycen(i);
+        tophalf(j) = (FWHM_Y/FWHM_X)*sqrt(FWHM_X^2 - (X(j) - x_cen(i))^2) + y_cen(i);
+        bothalf(j) =-(FWHM_Y/FWHM_X)*sqrt(FWHM_X^2 - (X(j) - x_cen(i))^2) + y_cen(i);
     end
     
     %disp(class(tophalf))
@@ -200,20 +159,21 @@ for i = 1:length(folderList);
     Bottomarray{i} = bothalf;
     legendarray{i} = legendname;
     
+    hold on
     Top = plot(X,tophalf,'Color',rand(1,3),'Linewidth',2,'DisplayName',legendname);
-    hold on
     Bottom = plot(X,bothalf,'Color',rand(1,3),'Linewidth',2,'DisplayName',legendname);
-    hold on
-    CenterofMass = plot(xcen(i),ycen(i),'*','Color',rand(1,3));
-    hold on
+    CenterofMass = plot(x_cen(i),y_cen(i),'*','Color',rand(1,3));
     xlabel('Pixels (-Z)');
     ylabel('Pixels (-X)');
     title('Full-width half-max of cloud');
     
     %disp(class(legendname))
     legend show
-    hold on;
+    
+    % Move back up in directory so we can go into the next folder
+    cd('..')
 end
+hold off
 
 % figure;
 % Xmat = cell2mat(Xarray);
@@ -233,8 +193,8 @@ ConversionFactor = PXtoCM*PXtoCM;
 % Now we want to figure out that diffusion constant
 % We're going to find it for x and y because it might be different
 % First start by pulling out variables for a linear fit
-linfitcoeffx = polyfit(times,vx,1);
-linfitcoeffy = polyfit(times,vy,1);
+linfitcoeffx = polyfit(times,x_var,1);
+linfitcoeffy = polyfit(times,y_var,1);
 % And this fit is to pixels, so convert it into cm
 diffx = linfitcoeffx(1) * ConversionFactor * 0.5;
 diffy = linfitcoeffy(1) * ConversionFactor * 0.5;
@@ -260,7 +220,7 @@ vyfit = polyval(linfitcoeffy,times);
 % Make a new figure separate from the FWHM plot
 figure;
 % Plotting the actual data points with *
-plot(timesMS,vx.*ConversionFactor,'*',timesMS,vy.*ConversionFactor,'*');
+plot(timesMS,x_var.*ConversionFactor,'*',timesMS,y_var.*ConversionFactor,'*');
 legend show
 title('Variance vs. Expansion Time');
 xlabel('Expansion Time (ms)');
@@ -279,3 +239,6 @@ plot(timesMS,vxfit.*ConversionFactor,timesMS,vyfit.*ConversionFactor);
 % The second is a list of the arrays if you wanted to look at the 3D plots
 % of each timing separately
 save('Plots.mat','PrettyPic');
+hold off
+%Reset the directory for the next analysis
+cd(initDir)
