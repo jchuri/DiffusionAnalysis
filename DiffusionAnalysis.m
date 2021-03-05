@@ -26,6 +26,10 @@
         % -"GenerateEllipses.m" takes the variance along x and y, uses them
         % to calculate the FWHM for each direction, then generates lists of
         % coordinates to plot each cloud
+    % Wrapped the calculations for the diffusion coefficients and G-factors,
+    % as well as the fitting of the diffusion coefficients, into a new
+    % function "CalculateDiffusionCoefs.m"
+    
 %% DATA REQUIREMENTS
 % All data folders should be named in the scheme '**ms' for data and '**bg'
 % for backgrounds. These folders go into a folder whose name is the date
@@ -45,7 +49,7 @@ clear;
 initDir = 'C:\Users\staronal\Desktop\Raw Data\Diffusion'; %IF YOU RUN THIS SCRIPT ON ANOTHER COMPUTER, CHANGE THIS PATH BEFOREHAND!
 dataDir = uigetdir('Where are all the data folders?');
 cd(dataDir);
-% Add initDir as an extra file path.
+% Add initDir as an extra file path
 % This is necessary in order to properly call the custom functions used to
 % analyze the data (like parseTXTFile, TwoDGaussianFitting, etc.)
 % There's probably a better way to do this whole analysis that would avoid
@@ -127,6 +131,7 @@ for i = 1:length(dataFolderList);
     % (FWHM). See "GenerateEllipses.m" for more details.
     [ellipse_X{1,i}, ellipse_Y{1,i}] = GenerateEllipses(x_var(i), y_var(i), x_cen(i), y_cen(i));
 end
+fprintf('Images averaged and fit, variances and center of mass extracted\nReady to plot the clouds\n')
 %% Plotting the Images
 % Go through the lists of points and centers for each cloud and plot them
 % on one graph. For now, label each center with its corresponding expansion
@@ -144,61 +149,32 @@ ylabel('Pixels (-X)');
 title('Full-Width Half-Max of Atomic Cloud');
 hold off
 %% Calculating Diffusion Constants and G-Factors
-% Now we want to figure out that diffusion constant
-% We're going to find it for x and y because it might be different
-% First start by pulling out variables for a linear fit
-linfitcoeffx = polyfit(times,x_var,1);
-linfitcoeffy = polyfit(times,y_var,1);
-% This fit is to pixels, so convert it into cm. The conversion factor here
-% is subject to change and comes from comparing the size of the cloud in
-% the image to the size of the cloud on the CRT TV. Will fill in with more
-% details when available.
+% Take the variances and times and apply a linear fit to them. Because this
+% fit uses the averaged images as its reference, it's scaled the pixels. We
+% can convert the fitting into cm using a conversion factor that's derived
+% from comparing images of the cloud on the camera and on the CRT TV. See
+% "CalculateDiffusionCoefs.m" for more details.
 % Ethan got a value of 5.2e-3, while Schiavoni used 4e-3 in their thesis.
 % Other values include 3.6e-3 and 2.85e-3 (the current value)
 PXtoCM = 2.85e-3;
-ConversionFactor = PXtoCM^2;
-diffx = linfitcoeffx(1) * ConversionFactor * 0.5;
-diffy = linfitcoeffy(1) * ConversionFactor * 0.5;
-
-disp(['Z Diffusion = ',num2str(diffx)]);
-disp(['X Diffusion = ',num2str(diffy)]);
-
-% Adding in a feature that calculates the unitless factor that Grynberg uses
-% in most of his diffusion graphs.
-% Convert the diffusion constants into the unitless factors that Grynberg
-% often used in his diffusion graphs (let's call them the "G-Factors")
-h = 6.63e-34;
-RbMass = 1.4e-25;
-Gx = 2*pi*RbMass*(diffy/10000)/h;
-Gz = 2*pi*RbMass*(diffx/10000)/h;
-
-disp(['Gx = ',num2str(Gx)]);
-disp(['Gz = ',num2str(Gz)]);
-
-% Once you have those variables for your line, plug them into a function to
-% get out a set of actualy fitted lines
-vxfit = polyval(linfitcoeffx,times);
-vyfit = polyval(linfitcoeffy,times);
-
+[diff_x, diff_y, G_x, G_z, diff_xFit, diff_yFit] = CalculateDiffusionCoefs(times, x_var, y_var, PXtoCM);
 % Make a new figure separate from the FWHM plot
 figure;
-% Plotting the actual data points with *
-plot(timesMS,x_var.*ConversionFactor,'*',timesMS,y_var.*ConversionFactor,'*');
-legend show
+% Plot the diffusion constants (after scaling them by the conversion factor, which is PXtoCM^2)
+plot(timesMS, x_var.*PXtoCM^2, '*');
+hold on
+plot(timesMS, y_var.*PXtoCM^2, '*');
 title('Variance vs. Expansion Time');
+% Plot the linear fit on top of the data points
+plot(timesMS, diff_xFit.*PXtoCM^2);
+plot(timesMS, diff_yFit.*PXtoCM^2);
 xlabel('Expansion Time (ms)');
 ylabel('Variance \sigma^{2} (cm^{2})');
-
-hold on
-% Plot the lienar fit overtop them
-plot(timesMS,vxfit.*ConversionFactor,timesMS,vyfit.*ConversionFactor);
-
+legend('Z diffusion coefficients', 'X diffusion coefficients', 'Z diffusion fit', 'X diffusion fit');
 % Finally save all of the data
 % The first is a set of the variables that we solved for
-
 %save('Solved.mat','vx','vy','xcen','ycen','times');
 %save('Diffusions.mat','diffx','diffy');
-
 % The second is a list of the arrays if you wanted to look at the 3D plots
 % of each timing separately
 save('Plots.mat','PrettyPic');
