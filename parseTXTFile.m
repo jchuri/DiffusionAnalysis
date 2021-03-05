@@ -1,4 +1,4 @@
-function isTXTFileOK = parseTXTFile(fileName, threshold, index, folderName)
+function fileContents = parseTXTFile(fileName, threshold, index, folderName)
 %% Description
 %This function loads a single .txt file and checks it to ensure that it can
 %be used in DiffusionAnalysis.m. THIS MUST BE SAVED IN THE SAME DIRECTORY
@@ -15,21 +15,22 @@ function isTXTFileOK = parseTXTFile(fileName, threshold, index, folderName)
     %folderName = Name of the folder that contains the .txt file
         %Note: These last two are only used if the file is bad
 %% OUTPUTS
-    %isTXTFileOK = True/false statement
+    %fileContents = Contents of the .txt file, which is an array of values.
+    %If the array fails either check, this becomes an empty set [].
 %%
     fileContents = load(fileName);
     %Get the maximum and minimum values within the file. The locations of
     %those values within the file don't seem to matter.
     intensityMax = max(fileContents(:));
     intensityMin = min(fileContents(:));
-    %Perform the cheks
+    %Perform the checks. If one fails, set fileContents to []
     if intensityMax < threshold
-        isTXTFileOK = false;
-        fprintf(['Tossed file #' index ' from the ' folderName ' folder - was above threshold'])
+        fileContents = [];
+        fprintf(['Tossed file #' index ' from the ' folderName ' folder - was below threshold'])
     elseif intensityMin < 0
-        isTXTFileOK = false;
+        fileContents = [];
         fprintf(['Tossed file #' index ' from the ' folderName ' folder - had negative values'])
     else
-        isTXTFileOK = true;
+        fileContents;
     end
 end
